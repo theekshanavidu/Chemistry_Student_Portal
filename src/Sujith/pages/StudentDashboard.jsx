@@ -690,7 +690,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
 
           <div class="footer">
             <div class="barcode-mock"></div>
-            <p class="footer-text">Thank you for learning with Sujith Chemistry Education at CM.ECHEM.LK!</p>
+            <p class="footer-text">Thank you for learning with Sajith Chemistry Education at CM.ECHEM.LK!</p>
             <p class="footer-text" style="margin-top: 5px;">This is a system generated digital invoice. No signature is required.</p>
           </div>
         </div>
@@ -1132,7 +1132,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
 
                 {/* 3. Telegram Support */}
                 <a
-                  href="https://t.me/sujithchemistry"
+                  href="https://t.me/sajithchemistry"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md transition-all cursor-pointer hover:-translate-y-1 flex flex-col justify-between"
@@ -1570,7 +1570,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                   </span>
                   <div className="grid grid-cols-2 gap-y-1.5 text-sm">
                     <span className="text-gray-400">Account Name:</span>
-                    <span className="font-semibold text-gray-800">Sujith Chemistry Education</span>
+                    <span className="font-semibold text-gray-800">Sajith Chemistry Education</span>
                     <span className="text-gray-400">Account Number:</span>
                     <span className="font-bold text-red-600 tracking-wider">8009234851</span>
                     <span className="text-gray-400">Branch:</span>
@@ -2335,7 +2335,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
         {/* ── Site Footer ── */}
         <footer className="border-t border-gray-200 bg-white px-6 py-4 text-center flex-shrink-0">
           <p className="text-xs font-bold text-gray-700 tracking-wide">
-            SKCHEM.COM - Sujith K Kumara
+            SKCHEM.COM - Sajith K Kumara
           </p>
           <p className="text-[10px] text-gray-400 mt-0.5 font-medium">
             Copyright &copy; Theekshana Viduranga <span className="font-mono">&lt;/&gt;</span>

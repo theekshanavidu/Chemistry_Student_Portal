@@ -115,7 +115,7 @@ export default function Register({ onNavigate }) {
             Login වෙන්න
           </button>
           <div className="text-center text-gray-400 pt-4 border-t border-gray-100 space-y-0.5">
-            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sujith K Kumara</p>
+            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sajith K Kumara</p>
             <p className="text-[10px] font-medium">Copyright &copy; Theekshana Viduranga <span className="font-mono">&lt;/&gt;</span></p>
           </div>
         </div>

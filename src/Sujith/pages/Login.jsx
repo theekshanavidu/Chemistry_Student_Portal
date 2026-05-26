@@ -159,7 +159,7 @@ export default function Login({ onNavigate }) {
           </form>
 
           <div className="text-center text-gray-400 mt-8 space-y-0.5">
-            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sujith K Kumara</p>
+            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sajith K Kumara</p>
             <p className="text-[10px] font-medium">Copyright &copy; Theekshana Viduranga <span className="font-mono">&lt;/&gt;</span></p>
           </div>
         </div>
