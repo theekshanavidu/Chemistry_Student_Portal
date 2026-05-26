@@ -44,15 +44,7 @@ export default function Login({ onNavigate }) {
 
       {/* ── Right: Form Panel ── */}
       <div className="flex-1 lg:w-[45%] flex flex-col items-center justify-center bg-white px-8 py-12 relative">
-        {/* Award badge - top right */}
-        <div className="absolute top-6 right-6">
-          <div className="w-16 h-16 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-full flex items-center justify-center shadow-lg border-4 border-yellow-300">
-            <div className="text-center">
-              <p className="text-white text-[7px] font-black leading-tight">AWARD</p>
-              <p className="text-white text-[6px] leading-tight">WINNER</p>
-            </div>
-          </div>
-        </div>
+
 
         <div className="w-full max-w-sm">
           <div className="flex items-center gap-2 mb-8">
