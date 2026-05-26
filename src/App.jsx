@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { auth } from './Sujith/config/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { getStudentProfile, saveStudentProfile } from './Sujith/db/firestoreService';
@@ -178,9 +178,9 @@ function AppInner() {
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AppInner />
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 
