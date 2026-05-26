@@ -1,36 +1,42 @@
-name: Deploy to GitHub Pages
+name: Build and Deploy to GitHub Pages
 
 on:
   push:
-    branches: ["main", "master"]
+    branches:
+      - main
+      - master
 
+# GitHub Pages deploy කිරීමට අවශ්‍ය permissions
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Code checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Node.js setup
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
+      # 3. Dependencies install
       - name: Install dependencies
         run: npm ci
 
-      - name: Build the project
+      # 4. Vite build
+      - name: Build project
         run: npm run build
 
+      # 5. gh-pages branch deploy
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
-          force_orphan: true
