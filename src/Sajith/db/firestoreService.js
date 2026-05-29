@@ -238,52 +238,174 @@ export const confirmTuteDelivery = async (paymentId) => {
   }
 };
 
+// ── ADMIN AUTH & MANAGEMENT FUNCTIONS ──
+
 /**
- * Check if a NIC number is unique across all registered students.
+ * Save admin details to Firestore 'admins' collection.
  */
-export const isNICUnique = async (nic, currentUid = null) => {
+export const saveAdminProfile = async (uid, adminData) => {
   try {
-    if (!nic) return true;
-    const q = query(collection(db, "students"), where("nic", "==", nic));
-    const querySnapshot = await getDocs(q);
-    if (querySnapshot.empty) return true;
-    
-    let unique = true;
-    querySnapshot.forEach((doc) => {
-      if (doc.id !== currentUid) {
-        unique = false;
-      }
+    const adminRef = doc(db, "admins", uid);
+    await setDoc(adminRef, {
+      ...adminData,
+      uid,
+      role: "admin",
+      createdAt: serverTimestamp(),
     });
-    return unique;
+    return { success: true };
   } catch (error) {
-    console.error("Error checking NIC uniqueness: ", error);
+    console.error("Error saving admin profile:", error);
     throw error;
   }
 };
 
 /**
- * Clean up approved slips that are older than 7 days.
- * Deletes the slipImage field content from Firestore to save storage and ensure privacy.
+ * Fetch admin profile by UID.
  */
-export const cleanupExpiredSlips = async () => {
+export const getAdminProfile = async (uid) => {
   try {
-    const q = query(collection(db, "payments"), where("status", "==", "approved"));
-    const querySnapshot = await getDocs(q);
-    const now = Date.now();
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    
-    for (const docSnap of querySnapshot.docs) {
-      const data = docSnap.data();
-      if (data.slipImage && data.approvedAt) {
-        const approvedTime = new Date(data.approvedAt).getTime();
-        if (now - approvedTime > sevenDaysMs) {
-          await updateDoc(doc(db, "payments", docSnap.id), {
-            slipImage: ""
-          });
-        }
-      }
+    const adminRef = doc(db, "admins", uid);
+    const docSnap = await getDoc(adminRef);
+    if (docSnap.exists()) {
+      return docSnap.data();
     }
+    return null;
   } catch (error) {
-    console.error("Error cleaning up expired slips: ", error);
+    console.error("Error fetching admin profile:", error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a class from the catalog.
+ */
+export const deleteClass = async (classId) => {
+  try {
+    await deleteDoc(doc(db, "classes", classId));
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting class:", error);
+    throw error;
+  }
+};
+
+/**
+ * Update class details (e.g. videos, zoom Link).
+ */
+export const updateClass = async (classId, data) => {
+  try {
+    const classRef = doc(db, "classes", classId);
+    await updateDoc(classRef, {
+      ...data,
+      updatedAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating class:", error);
+    throw error;
+  }
+};
+
+/**
+ * Find a student profile by their custom Student ID.
+ */
+export const getStudentByStudentId = async (studentId) => {
+  try {
+    const q = query(collection(db, "students"), where("studentId", "==", studentId));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const doc = querySnapshot.docs[0];
+      return { id: doc.id, ...doc.data() };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error finding student by ID:", error);
+    throw error;
+  }
+};
+
+/**
+ * Activate a class physically for a student.
+ */
+export const activateClassForStudent = async (studentUid, studentName, studentId, classId, classTitle, price) => {
+  try {
+    // Check if there is already an active payment for this class and student
+    const q = query(
+      collection(db, "payments"),
+      where("studentUid", "==", studentUid),
+      where("classId", "==", classId)
+    );
+    const querySnapshot = await getDocs(q);
+
+    if (!querySnapshot.empty) {
+      // Update existing payment to approved
+      const payDoc = querySnapshot.docs[0];
+      await updateDoc(doc(db, "payments", payDoc.id), {
+        status: "approved",
+        approvedAt: new Date().toISOString(),
+        paymentType: "physical_activation"
+      });
+    } else {
+      // Create new approved payment record
+      await addDoc(collection(db, "payments"), {
+        studentUid,
+        studentName,
+        studentId,
+        classId,
+        classTitle,
+        price: Number(price),
+        status: "approved",
+        paymentType: "physical_activation",
+        submittedAt: new Date().toISOString(),
+        approvedAt: new Date().toISOString(),
+        tuteRequired: true,
+        deliveryStatus: "Pending"
+      });
+    }
+    return { success: true };
+  } catch (error) {
+    console.error("Error activating class for student:", error);
+    throw error;
+  }
+};
+
+/**
+ * Deactivate a class for a student.
+ */
+export const deactivateClassForStudent = async (studentUid, classId) => {
+  try {
+    const q = query(
+      collection(db, "payments"),
+      where("studentUid", "==", studentUid),
+      where("classId", "==", classId)
+    );
+    const querySnapshot = await getDocs(q);
+
+    // Delete or mark rejected
+    for (const docSnap of querySnapshot.docs) {
+      await deleteDoc(doc(db, "payments", docSnap.id));
+    }
+    return { success: true };
+  } catch (error) {
+    console.error("Error deactivating class for student:", error);
+    throw error;
+  }
+};
+
+/**
+ * Update delivery status, tracking ID, and courier link for a payment.
+ */
+export const updatePaymentDelivery = async (paymentId, updateData) => {
+  try {
+    const paymentRef = doc(db, "payments", paymentId);
+    await updateDoc(paymentRef, {
+      ...updateData,
+      shippedAt: updateData.deliveryStatus === "Shipped" ? new Date().toISOString() : undefined,
+      deliveredAt: updateData.deliveryStatus === "Delivered" ? new Date().toISOString() : undefined
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating payment delivery status:", error);
+    throw error;
   }
 };
