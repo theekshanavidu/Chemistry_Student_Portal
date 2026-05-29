@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { registerStudent } from "../services/authService";
-import { saveStudentProfile, isNICUnique } from "../db/firestoreService";
+import { saveStudentProfile } from "../db/firestoreService";
 import { auth } from "../config/firebase";
 import { signOut } from "firebase/auth";
 
@@ -71,13 +71,6 @@ export default function Register({ onNavigate }) {
     setLoading(true);
     setError("");
     try {
-      // Check if NIC is unique
-      const nicUnique = await isNICUnique(formData.nic);
-      if (!nicUnique) {
-        setError("මෙම NIC අංකය දැනටමත් ලියාපදිංචි කර ඇත.");
-        setLoading(false);
-        return;
-      }
       const user = await registerStudent(formData.email, formData.password);
       const { password, ...profileData } = formData;
       await saveStudentProfile(user.uid, profileData, true); // isNew=true
@@ -122,7 +115,7 @@ export default function Register({ onNavigate }) {
             Login වෙන්න
           </button>
           <div className="text-center text-gray-400 pt-4 border-t border-gray-100 space-y-0.5">
-            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sajith K Kumara</p>
+            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sujith K Kumara</p>
             <p className="text-[10px] font-medium">Copyright &copy; Theekshana Viduranga <span className="font-mono">&lt;/&gt;</span></p>
           </div>
         </div>
