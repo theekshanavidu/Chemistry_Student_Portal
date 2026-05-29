@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { registerStudent } from "../services/authService";
-import { saveStudentProfile, isNICUnique } from "../db/firestoreService";
+import { saveStudentProfile } from "../db/firestoreService";
 import { auth } from "../config/firebase";
 import { signOut } from "firebase/auth";
 
@@ -12,7 +12,7 @@ const generateStudentIdForYear = (batch) => {
       prefix = match[0].substring(2); // e.g. "26" from "2026AL"
     }
   }
-  const randomPart = Math.floor(10000000 + Math.random() * 90000000).toString(); // 8 digits
+  const randomPart = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
   return prefix + randomPart;
 };
 
@@ -46,7 +46,6 @@ export default function Register({ onNavigate }) {
   const [success, setSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [agreed, setAgreed] = useState(false);
-  const [whatsappSameAsMobile, setWhatsappSameAsMobile] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -57,24 +56,8 @@ export default function Register({ onNavigate }) {
         batch: value,
         studentId: newId,
       }));
-    } else if (name === "mobile") {
-      setFormData((prev) => {
-        const updated = { ...prev, mobile: value };
-        if (whatsappSameAsMobile) {
-          updated.whatsapp = value;
-        }
-        return updated;
-      });
     } else {
       setFormData((prev) => ({ ...prev, [name]: value }));
-    }
-  };
-
-  const handleWhatsappCheckboxChange = (e) => {
-    const checked = e.target.checked;
-    setWhatsappSameAsMobile(checked);
-    if (checked) {
-      setFormData((prev) => ({ ...prev, whatsapp: prev.mobile }));
     }
   };
 
@@ -88,23 +71,10 @@ export default function Register({ onNavigate }) {
     setLoading(true);
     setError("");
     try {
-      // 1. Create the Firebase Auth account first (needed for Firestore auth rules)
       const user = await registerStudent(formData.email, formData.password);
-
-      // 2. NOW check NIC uniqueness — user is authenticated so Firestore rules pass
-      const nicUnique = await isNICUnique(formData.nic);
-      if (!nicUnique) {
-        // Rollback: delete the auth account we just created
-        await user.delete();
-        setError("මෙම NIC අංකය දැනටමත් ලියාපදිංචි කර ඇත.");
-        setLoading(false);
-        return;
-      }
-
-      // 3. Save profile to Firestore
       const { password, ...profileData } = formData;
       await saveStudentProfile(user.uid, profileData, true); // isNew=true
-      await signOut(auth); // Sign out immediately — redirect to login
+      await signOut(auth); // Sign out immediately to clear auth state for login redirect
       setSuccess(true);
     } catch (err) {
       const messages = {
@@ -145,7 +115,7 @@ export default function Register({ onNavigate }) {
             Login වෙන්න
           </button>
           <div className="text-center text-gray-400 pt-4 border-t border-gray-100 space-y-0.5">
-            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sajith K Kumara</p>
+            <p className="text-xs font-bold text-gray-600">SKCHEM.COM - Sujith K Kumara</p>
             <p className="text-[10px] font-medium">Copyright &copy; Theekshana Viduranga <span className="font-mono">&lt;/&gt;</span></p>
           </div>
         </div>
@@ -197,7 +167,6 @@ export default function Register({ onNavigate }) {
                 <label className={labelCls}>First Name</label>
                 <input type="text" name="firstName" required
                   placeholder="Enter your First Name"
-                  value={formData.firstName}
                   onChange={handleChange} className={inputCls} />
               </div>
 
@@ -206,7 +175,6 @@ export default function Register({ onNavigate }) {
                 <label className={labelCls}>Last Name</label>
                 <input type="text" name="lastName" required
                   placeholder="Enter your Last Name"
-                  value={formData.lastName}
                   onChange={handleChange} className={inputCls} />
               </div>
 
@@ -215,7 +183,6 @@ export default function Register({ onNavigate }) {
                 <label className={labelCls}>Email</label>
                 <input type="email" name="email" required
                   placeholder="Enter your Email"
-                  value={formData.email}
                   onChange={handleChange} className={inputCls} />
               </div>
 
@@ -227,7 +194,6 @@ export default function Register({ onNavigate }) {
                     type={showPassword ? "text" : "password"}
                     name="password" required
                     placeholder="Minimum 6 characters"
-                    value={formData.password}
                     onChange={handleChange}
                     className={`${inputCls} pr-11`}
                   />
@@ -248,37 +214,22 @@ export default function Register({ onNavigate }) {
                 <label className={labelCls}>Mobile</label>
                 <input type="tel" name="mobile" required
                   placeholder="0777123456"
-                  value={formData.mobile}
                   onChange={handleChange} className={inputCls} />
               </div>
 
               {/* WhatsApp */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-sm font-medium text-gray-700">WhatsApp Number</label>
-                  <label className="inline-flex items-center gap-1.5 text-xs text-red-600 font-semibold cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={whatsappSameAsMobile}
-                      onChange={handleWhatsappCheckboxChange}
-                      className="w-3.5 h-3.5 accent-red-600 rounded cursor-pointer"
-                    />
-                    Same as Mobile
-                  </label>
-                </div>
+                <label className={labelCls}>WhatsApp Number <span className="text-gray-400 text-xs font-normal">– Same as Mobile</span></label>
                 <input type="tel" name="whatsapp" required
                   placeholder="0777123456"
-                  value={formData.whatsapp}
-                  disabled={whatsappSameAsMobile}
-                  onChange={handleChange} className={`${inputCls} ${whatsappSameAsMobile ? "bg-gray-100 cursor-not-allowed" : ""}`} />
+                  onChange={handleChange} className={inputCls} />
               </div>
 
               {/* Other Mobile (optional) */}
               <div>
                 <label className={labelCls}>Other Mobile <span className="text-gray-400 text-xs font-normal">(Optional)</span></label>
                 <input type="tel" name="otherMobile"
-                  placeholder="0717654321"
-                  value={formData.otherMobile}
+                  placeholder="0714667630"
                   onChange={handleChange} className={inputCls} />
               </div>
 
@@ -286,8 +237,7 @@ export default function Register({ onNavigate }) {
               <div>
                 <label className={labelCls}>NIC</label>
                 <input type="text" name="nic" required
-                  placeholder="200012345678"
-                  value={formData.nic}
+                  placeholder="200723501679"
                   onChange={handleChange} className={inputCls} />
               </div>
 
@@ -295,7 +245,6 @@ export default function Register({ onNavigate }) {
               <div>
                 <label className={labelCls}>Birthday</label>
                 <input type="date" name="birthday" required
-                  value={formData.birthday}
                   onChange={handleChange} className={inputCls} />
               </div>
 
@@ -358,7 +307,6 @@ export default function Register({ onNavigate }) {
                 <label className={labelCls}>Home City / Town</label>
                 <input type="text" name="homeCity" required
                   placeholder="Colombo, Kandy, Galle..."
-                  value={formData.homeCity}
                   onChange={handleChange} className={inputCls} />
               </div>
 
@@ -367,7 +315,6 @@ export default function Register({ onNavigate }) {
                 <label className={labelCls}>Address</label>
                 <input type="text" name="address" required
                   placeholder="No. 123, Street, City"
-                  value={formData.address}
                   onChange={handleChange} className={inputCls} />
               </div>
 

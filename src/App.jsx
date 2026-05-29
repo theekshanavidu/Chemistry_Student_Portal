@@ -28,14 +28,21 @@ function AppInner() {
       setAuthError('');
       if (currentUser) {
         setUser(currentUser);
+        
+        // If registering, let the Register component handle profile creation and signOut
+        if (window.location.hash.includes("register")) {
+          setLoading(false);
+          return;
+        }
+
         try {
           let profile = await getStudentProfile(currentUser.uid);
           if (!profile) {
             const defaultProfile = {
               firstName: currentUser.email ? currentUser.email.split('@')[0] : 'Student',
-              lastName: 'User',
+              lastName: '',
               email: currentUser.email || 'student@skchem.com',
-              studentId: 'SK' + Math.floor(100000 + Math.random() * 900000).toString(),
+              studentId: '26' + Math.floor(10000000 + Math.random() * 90000000).toString(),
               batch: '2026AL',
               mobile: '0777123456',
               address: 'No. 123, Street, City',

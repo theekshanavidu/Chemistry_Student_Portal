@@ -9,59 +9,9 @@ import {
   getClasses,
   submitPayment,
   getStudentPayments,
-  confirmTuteDelivery,
-  isNICUnique,
-  cleanupExpiredSlips
+  confirmTuteDelivery
 } from "../db/firestoreService";
 import ImageCropModal from "./ImageCropModal";
-
-const compressImage = (base64Str, maxWidth = 500, maxHeight = 500, quality = 0.5) => {
-  return new Promise((resolve) => {
-    if (!base64Str || !base64Str.startsWith("data:image/")) {
-      resolve(base64Str);
-      return;
-    }
-    // Timeout of 1.5 seconds to prevent hanging on slower browsers/devices
-    const timeoutId = setTimeout(() => {
-      console.warn("Compression timed out, using original base64");
-      resolve(base64Str);
-    }, 1500);
-
-    const img = new Image();
-    img.src = base64Str;
-    img.onload = () => {
-      clearTimeout(timeoutId);
-      let width = img.width;
-      let height = img.height;
-
-      if (width > height) {
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        }
-      } else {
-        if (height > maxHeight) {
-          width = Math.round((width * maxHeight) / height);
-          height = maxHeight;
-        }
-      }
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-
-      const compressed = canvas.toDataURL("image/jpeg", quality);
-      resolve(compressed);
-    };
-    img.onerror = () => {
-      clearTimeout(timeoutId);
-      resolve(base64Str);
-    };
-  });
-};
 
 export default function StudentDashboard({ onNavigate, initialStudentData, onLogout }) {
   const navigate = useNavigate();
@@ -83,11 +33,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
   const activeTab = tabFromPath();
   const [student, setStudent] = useState(initialStudentData || null);
   const [profileForm, setProfileForm] = useState(null);
-  
-  // Explicit dedicated states for NIC images to prevent state nesting issues
-  const [nicFront, setNicFront] = useState("");
-  const [nicBack, setNicBack] = useState("");
-
   const [classes, setClasses] = useState([]);
   const [payments, setPayments] = useState([]);
   const [selectedBatchTab, setSelectedBatchTab] = useState("2026AL"); // "2026AL", "2027AL", "2028AL", "2026Rapid"
@@ -118,9 +63,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
-
-  // Ref to always hold the latest selected NIC images (avoids async closure stale-state)
-  const nicImagesRef = useRef({ nicFrontImage: null, nicBackImage: null });
 
   // Image crop modal state
   const [cropSrc, setCropSrc] = useState(null);
@@ -280,8 +222,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
   useEffect(() => {
     if (student) {
       setProfileForm(student);
-      setNicFront(student.nicFrontImage || "");
-      setNicBack(student.nicBackImage || "");
     }
   }, [student]);
 
@@ -326,7 +266,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
   useEffect(() => {
     loadClassesCatalog();
     loadPaymentsLog();
-    cleanupExpiredSlips();
   }, []);
 
   // Sync data loading with path change
@@ -335,23 +274,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
     if (currentTab === "purchaseClass") loadClassesCatalog();
     if (currentTab === "payments" || currentTab === "ongoingClass" || currentTab === "tuteTracking") loadPaymentsLog();
   }, [location.pathname]);
-
-  const handleRefreshAll = async () => {
-    const user = auth.currentUser;
-    if (user) {
-      try {
-        const data = await getStudentProfile(user.uid);
-        if (data) {
-          setStudent(data);
-          setProfileForm(data);
-        }
-      } catch (e) {
-        console.error("Error refreshing profile:", e);
-      }
-    }
-    await loadClassesCatalog();
-    await loadPaymentsLog();
-  };
 
   // Handle Tab Switch
   const handleTabChange = (tab) => {
@@ -374,91 +296,30 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
 
   // Profile Form Submit
   const handleProfileSubmit = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
+    e.preventDefault();
     setSavingProfile(true);
     setProfileMsg("");
     try {
       const user = auth.currentUser;
       if (user) {
-        // Merge latest NIC images states into final document payload
-        const finalForm = {
-          ...profileForm,
-          nicFrontImage: nicFront,
-          nicBackImage: nicBack,
-        };
-
-        // Enforce all details are filled check (nic, address, etc.)
-        const isProfileImgRequired = !student?.isProfileVerified;
-        const isNICImgRequired = !student?.isNICVerified;
-
-        // Check for specific missing fields to show a helpful alert
-        const missingFields = [];
-        if (!finalForm.firstName) missingFields.push("First Name (මුල් නම)");
-        if (!finalForm.lastName) missingFields.push("Last Name (වාසගම)");
-        if (!finalForm.gender) missingFields.push("Gender (ස්ත්‍රී/පුරුෂ භාවය)");
-        if (!finalForm.mobile) missingFields.push("Mobile Number (ජංගම දුරකථන අංකය)");
-        if (!finalForm.whatsapp) missingFields.push("WhatsApp Number (WhatsApp අංකය)");
-        if (!finalForm.nic) missingFields.push("NIC Number (හැඳුනුම්පත් අංකය)");
-        if (!finalForm.batch) missingFields.push("Batch (කණ්ඩායම)");
-        if (!finalForm.school) missingFields.push("School (පාසල)");
-        if (!finalForm.homeCity) missingFields.push("Home City (පදිංචි නගරය)");
-        if (!finalForm.address) missingFields.push("Home Address (පදිංචි ලිපිනය)");
-        if (isProfileImgRequired && !finalForm.profileImage) missingFields.push("Profile Image (ප්‍රෝෆයිල් පින්තූරය)");
-        if (isNICImgRequired && !finalForm.nicFrontImage) missingFields.push("NIC Front Side Image (හැඳුනුම්පත ඉදිරිපස ඡායාරූපය)");
-        if (isNICImgRequired && !finalForm.nicBackImage) missingFields.push("NIC Back Side Image (හැඳුනුම්පත පසුපස ඡායාරූපය)");
-
-        if (missingFields.length > 0) {
-          alert("⚠️ කරුණාකර පහත සඳහන් තොරතුරු සම්පූර්ණ කරන්න:\n\n• " + missingFields.join("\n• "));
-          setProfileMsg("⚠️ කරුණාකර සියලුම තොරතුරු සම්පූර්ණ කරන්න.");
-          setSavingProfile(false);
-          return;
-        }
-
-        // Check if NIC is unique
-        const nicUnique = await isNICUnique(finalForm.nic, user.uid);
-        if (!nicUnique) {
-          alert("⚠️ මෙම NIC අංකය දැනටමත් වෙනත් ගිණුමක ලියාපදිංචි කර ඇත.");
-          setProfileMsg("⚠️ මෙම NIC අංකය දැනටමත් වෙනත් ගිණුමක ලියාපදිංචි කර ඇත.");
-          setSavingProfile(false);
-          return;
-        }
-
-        const res = await saveStudentProfile(user.uid, finalForm);
-        if (res.success) {
-          setStudent(finalForm);
-          setProfileForm(finalForm);
-          alert("✅ ඔබගේ Profile එක සාර්ථකව යාවත්කාලීන කරන ලදී!");
-          setProfileMsg("Profile එක සාර්ථකව යාවත්කාලීන කරන ලදී!");
-        } else {
-          alert("❌ සේව් කිරීමට නොහැකි විය. නැවත උත්සාහ කරන්න.");
-        }
-      } else {
-        alert("⚠️ පරිශීලකයා ලොග් වී නැත. කරුණාකර නැවත ලොග් වන්න.");
+        await saveStudentProfile(user.uid, profileForm);
+        setStudent(profileForm);
+        setProfileMsg("Profile එක සාර්ථකව යාවත්කාලීන කරන ලදී!");
       }
     } catch (err) {
-      alert("❌ දෝෂයකි: " + err.message);
       setProfileMsg("Error: " + err.message);
     } finally {
       setSavingProfile(false);
     }
   };
 
-  // Handle Image Upload and convert to Base64 (Supports Image & PDF)
+  // Handle Image Upload and convert to Base64
   const handleImageFileChange = (e) => {
     const file = e.target.files[0];
-    setModalError("");
     if (file) {
-      if (file.size > 1024 * 1024) {
-        setModalError("⚠️ ගොනුවේ ප්‍රමාණය 1MB ට වඩා වැඩි විය නොහැක. (File size cannot exceed 1MB)");
-        return;
-      }
       const reader = new FileReader();
-      reader.onloadend = async () => {
-        let finalData = reader.result;
-        if (reader.result.startsWith("data:image/")) {
-          finalData = await compressImage(reader.result);
-        }
-        setSlipImage(finalData);
+      reader.onloadend = () => {
+        setSlipImage(reader.result);
       };
       reader.readAsDataURL(file);
     }
@@ -468,11 +329,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
   const handleProfilePhotoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 1024 * 1024) {
-      alert("⚠️ ඡායාරූපයේ ප්‍රමාණය 1MB ට වඩා වැඩි විය නොහැක. (File size cannot exceed 1MB)");
-      e.target.value = "";
-      return;
-    }
     // Reset input so same file can be re-selected
     e.target.value = "";
     const reader = new FileReader();
@@ -483,36 +339,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
     reader.readAsDataURL(file);
   };
 
-  // Handle NIC Images Upload — uses a ref to guarantee latest data is available on submit
-  const handleNICFileChange = (e, side) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 1.5 * 1024 * 1024) {
-        alert("⚠️ ඡායාරූපයේ ප්‍රමාණය 1.5MB ට වඩා වැඩි විය නොහැක. (File size cannot exceed 1.5MB)");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        try {
-          const compressed = await compressImage(reader.result);
-          if (side === "nicFrontImage") {
-            setNicFront(compressed);
-          } else {
-            setNicBack(compressed);
-          }
-        } catch (err) {
-          console.error("Compression/Loading error:", err);
-          if (side === "nicFrontImage") {
-            setNicFront(reader.result);
-          } else {
-            setNicBack(reader.result);
-          }
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   // Called when user confirms crop
   const handleCropDone = async (croppedBase64) => {
     setShowCropModal(false);
@@ -521,8 +347,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
     try {
       const user = auth.currentUser;
       if (user) {
-        const compressed = await compressImage(croppedBase64);
-        const updated = { ...student, profileImage: compressed };
+        const updated = { ...student, profileImage: croppedBase64 };
         await saveStudentProfile(user.uid, updated);
         setStudent(updated);
         setProfileForm(updated);
@@ -1102,6 +927,30 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
             </div>
           </nav>
         </div>
+
+        {/* User Profile Info Footer in Sidebar */}
+        <div className="p-4 border-t border-gray-100">
+          <div className="flex items-center gap-3 mb-3">
+            {student?.profileImage ? (
+              <img src={student.profileImage} alt="Avatar" className="w-10 h-10 rounded-full object-cover border" />
+            ) : (
+              <div className="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center text-white font-bold shadow-inner">
+                {getInitials()}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-gray-800 truncate">{student ? `${student.firstName} ${student.lastName}` : "Student Profile"}</p>
+              <p className="text-xs text-gray-400 truncate">{student?.studentId ? `ID: ${student.studentId}` : "Unverified"}</p>
+            </div>
+          </div>
+          <button
+            onClick={onLogout}
+            className="w-full py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* ── Main Content Panel ── */}
@@ -1126,18 +975,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Refresh Button */}
-            <button
-              onClick={handleRefreshAll}
-              className="px-3.5 py-2 text-xs font-bold text-red-700 hover:text-red-800 bg-red-50 hover:bg-red-100 transition-all rounded-xl border border-red-200 shadow-sm flex items-center gap-1.5 cursor-pointer"
-              title="Refresh Data (දත්ත යාවත්කාලීන කරන්න)"
-            >
-              <svg className="w-4 h-4 text-red-600 transition-transform duration-500 hover:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89H18v3z" />
-              </svg>
-              Refresh
-            </button>
-
             {/* Notification Icon */}
             <div className="relative cursor-pointer text-gray-500 hover:text-gray-800">
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -1620,31 +1457,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                 </p>
               </div>
 
-              {/* Profile Verification Block Alert */}
-              {(!student?.isProfileVerified || !student?.isNICVerified) && (
-                <div className="bg-red-100 border-2 border-red-300 rounded-2xl p-6 text-red-800 text-xs leading-relaxed flex flex-col gap-3 shadow-md">
-                  <div className="flex items-start gap-2.5">
-                    <span className="text-xl">🔒</span>
-                    <div className="space-y-1">
-                      <p className="font-extrabold text-sm text-red-700">පන්ති මිලදී ගැනීම සඳහා ඔබගේ Profile එක Verify කළ යුතුය.</p>
-                      <p className="font-medium text-slate-700">පන්ති මිලදී ගැනීමට (Buy Class) ප්‍රථමයෙන් ඔබගේ Profile එක සාර්ථකව Verify විය යුතුය. කරුණාකර 'My Profile' පිටුව වෙත ගොස් ඔබගේ Profile Photo, NIC අංකය, සහ NIC ඡායාරූප (Front & Back) නිවැරදිව ඇතුලත් කර Save කරන්න.</p>
-                      <p className="font-bold text-red-650 bg-red-50 p-2 rounded border border-red-200 inline-block mt-2">📌 සටහන: තොරතුරු upload කර පැය 24 ක් ඇතුලත verify වේ.</p>
-                      <div>
-                        <button
-                          onClick={() => handleTabChange("profile")}
-                          className="mt-3.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs py-2.5 px-4.5 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer border-0"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                          </svg>
-                          Verify Profile (ප්‍රෝෆයිල් එකට යන්න)
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* AL Batch Filter Tabs */}
               <div className="bg-amber-400 rounded-xl p-1 flex overflow-x-auto shadow-sm">
                 {["2026AL", "2027AL", "2028AL", "2026Rapid"].map((batch) => (
@@ -1721,14 +1533,6 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                               >
                                 <div className="w-3.5 h-3.5 border-2 border-amber-700 border-t-transparent rounded-full animate-spin" />
                                 PENDING APPROVAL
-                              </button>
-                            ) : (!student?.isProfileVerified || !student?.isNICVerified) ? (
-                              <button
-                                disabled
-                                className="w-full bg-gray-100 text-gray-400 font-bold text-xs py-2.5 rounded-lg cursor-not-allowed flex items-center justify-center gap-1.5 border border-gray-200"
-                              >
-                                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                                VERIFICATION REQUIRED (සක්‍රීය කර නැත)
                               </button>
                             ) : (
                               <button
@@ -1929,30 +1733,26 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                         {getInitials()}
                       </div>
                     )}
-                    {/* Hover upload overlay (desktop) - disabled if verified */}
-                    {!student?.isProfileVerified && (
-                      <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white cursor-pointer transition-opacity duration-300 text-[10px] font-bold">
-                        <svg className="w-5 h-5 mb-1 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        </svg>
-                        CHANGE PHOTO
-                        <input type="file" accept="image/*" onChange={handleProfilePhotoChange} className="hidden" />
-                      </label>
-                    )}
-                  </div>
-                  
-                  {/* Mobile camera badge - disabled if verified */}
-                  {!student?.isProfileVerified && (
-                    <label
-                      className="absolute bottom-0 right-0 w-9 h-9 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center cursor-pointer shadow-lg transition-colors border-2 border-white md:hidden"
-                      title="Change Profile Photo"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {/* Hover upload overlay (desktop) */}
+                    <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white cursor-pointer transition-opacity duration-300 text-[10px] font-bold">
+                      <svg className="w-5 h-5 mb-1 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                       </svg>
+                      CHANGE PHOTO
                       <input type="file" accept="image/*" onChange={handleProfilePhotoChange} className="hidden" />
                     </label>
-                  )}
+                  </div>
+                  
+                  {/* Mobile camera badge */}
+                  <label
+                    className="absolute bottom-0 right-0 w-9 h-9 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center cursor-pointer shadow-lg transition-colors border-2 border-white md:hidden"
+                    title="Change Profile Photo"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    </svg>
+                    <input type="file" accept="image/*" onChange={handleProfilePhotoChange} className="hidden" />
+                  </label>
                 </div>
 
                 {/* Name / ID / Guidelines info */}
@@ -1988,24 +1788,14 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                       <li>ඡායාරූපය ඇතුලත් කිරීමේදී අවශ්‍ය පරිදි එය කපා සකස් කිරීමට (Crop) හැකිවේ.</li>
                       <li>මෙම ඡායාරූපය ඔබගේ <b>Virtual Student ID</b> පත සඳහා ස්වයංක්‍රීයව භාවිත කෙරේ.</li>
                     </ul>
-                    <p className="text-[11px] font-bold text-red-600 mt-1">⚠️ කරුණාකර 1MB ට වඩා අඩු ඡායාරූපයක් (png, jpeg, jpg) ඇතුළත් කරන්න.</p>
-                    <p className="text-[11px] font-semibold text-red-650 mt-0.5 bg-red-50 p-2 rounded border border-red-100">
-                      📌 සටහන: තොරතුරු සහ පින්තූර upload කර පැය 24 ක් ඇතුලත verify වේ.
-                    </p>
                     <div className="pt-2">
-                      {!student?.isProfileVerified ? (
-                        <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 hover:border-red-500 hover:text-red-600 text-gray-700 text-xs font-bold rounded-lg cursor-pointer shadow-sm transition-all">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                          </svg>
-                          Upload Photo
-                          <input type="file" accept="image/*" onChange={handleProfilePhotoChange} className="hidden" />
-                        </label>
-                      ) : (
-                        <div className="text-[11px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-lg p-2.5 flex items-center gap-1.5">
-                          <span>✓</span> Profile Verified &amp; Photo Locked (වෙනස් කිරීමට Admin අමතන්න)
-                        </div>
-                      )}
+                      <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 hover:border-red-500 hover:text-red-600 text-gray-700 text-xs font-bold rounded-lg cursor-pointer shadow-sm transition-all">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Upload Photo
+                        <input type="file" accept="image/*" onChange={handleProfilePhotoChange} className="hidden" />
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -2020,7 +1810,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                 </div>
               )}
 
-              <form onSubmit={(e) => e.preventDefault()} className="space-y-6">
+              <form onSubmit={handleProfileSubmit} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* First Name */}
                   <div>
@@ -2030,6 +1820,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                       name="firstName"
                       value={profileForm.firstName}
                       onChange={handleProfileChange}
+                      required
                       className="w-full px-4 py-2 border rounded-lg text-sm bg-gray-50 focus:bg-white"
                     />
                   </div>
@@ -2042,6 +1833,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                       name="lastName"
                       value={profileForm.lastName}
                       onChange={handleProfileChange}
+                      required
                       className="w-full px-4 py-2 border rounded-lg text-sm bg-gray-50 focus:bg-white"
                     />
                   </div>
@@ -2080,6 +1872,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                       name="mobile"
                       value={profileForm.mobile}
                       onChange={handleProfileChange}
+                      required
                       className="w-full px-4 py-2 border rounded-lg text-sm bg-gray-50 focus:bg-white"
                     />
                   </div>
@@ -2116,16 +1909,9 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                       name="nic"
                       value={profileForm.nic}
                       onChange={handleProfileChange}
-                      disabled={student?.isNICVerified}
-                      className={`w-full px-4 py-2 border rounded-lg text-sm bg-gray-50 focus:bg-white ${
-                        student?.isNICVerified ? "bg-gray-100 text-gray-400 cursor-not-allowed border-green-200" : ""
-                      }`}
+                      required
+                      className="w-full px-4 py-2 border rounded-lg text-sm bg-gray-50 focus:bg-white"
                     />
-                    {student?.isNICVerified && (
-                      <span className="text-[10px] text-green-600 font-extrabold mt-1 block">
-                        ✓ Verified &amp; Locked (වෙනස් කිරීමට Admin අමතන්න)
-                      </span>
-                    )}
                   </div>
 
                   {/* Batch */}
@@ -2164,6 +1950,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                       name="homeCity"
                       value={profileForm.homeCity}
                       onChange={handleProfileChange}
+                      required
                       className="w-full px-4 py-2 border rounded-lg text-sm bg-gray-50 focus:bg-white"
                     />
                   </div>
@@ -2176,99 +1963,15 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                       name="address"
                       value={profileForm.address}
                       onChange={handleProfileChange}
+                      required
                       className="w-full px-4 py-2 border rounded-lg text-sm bg-gray-50 focus:bg-white"
                     />
-                  </div>
-
-                  {/* NIC Front & Back Section */}
-                  <div className="md:col-span-2 border-t border-gray-200 pt-6 mt-4">
-                    <h4 className="text-sm font-extrabold text-gray-800 mb-1">National ID Card (NIC) Verification</h4>
-                    {student?.isNICVerified ? (
-                      <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center flex flex-col items-center justify-center gap-2 mt-2 shadow-sm">
-                        <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white text-xl shadow-md shadow-green-150 animate-bounce">✓</div>
-                        <h5 className="font-extrabold text-green-800 text-sm">NIC Verified Successfully!</h5>
-                        <p className="text-xs text-green-700 font-medium">ඔබගේ ජාතික හැඳුනුම්පත (NIC) සාර්ථකව තහවුරු කර ඇත. ආරක්ෂක හේතූන් මත ඔබගේ හැඳුනුම්පත් ඡායාරූප පද්ධතියෙන් ස්වයංක්‍රීයව මකාදමා ඇත.</p>
-                      </div>
-                    ) : (
-                      <>
-                        <p className="text-[11px] text-gray-500 mb-2">ඔබගේ අනන්‍යතාවය තහවුරු කිරීම සඳහා ජාතික හැඳුනුම්පතෙහි ඉදිරිපස සහ පසුපස ඡායාරූප ඇතුළත් කරන්න.</p>
-                        <p className="text-[11px] font-bold text-red-650 mb-3">⚠️ කරුණාකර 1.5MB ට වඩා අඩු ඡායාරූපයක් (png, jpeg, jpg) ඇතුළත් කරන්න.</p>
-                        <div className="text-[11px] font-semibold text-red-650 bg-red-50/50 p-2.5 rounded-lg border border-red-100 mb-4">
-                          📌 සටහන: තොරතුරු සහ පින්තූර upload කර පැය 24 ක් ඇතුලත verify වේ.
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-2">
-                          {/* NIC Front Image Upload */}
-                          <div>
-                            <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase">NIC Front Side (ඉදිරිපස)</label>
-                            <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-red-500 transition-colors bg-gray-50/50">
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={(e) => handleNICFileChange(e, "nicFrontImage")}
-                                className="hidden"
-                                id="nic-front-picker"
-                              />
-                              <label htmlFor="nic-front-picker" className="cursor-pointer space-y-2 block">
-                                {nicFront ? (
-                                  <div className="relative inline-block">
-                                    <img
-                                      src={nicFront}
-                                      alt="NIC Front Preview"
-                                      className="h-28 object-contain rounded-lg border bg-white shadow-sm"
-                                    />
-                                    <span className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs cursor-pointer shadow" onClick={(e) => { e.preventDefault(); setNicFront(""); }}>✕</span>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-1">
-                                    <svg className="w-8 h-8 text-gray-400 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                    <p className="text-xs font-semibold text-red-655">Choose Image File</p>
-                                  </div>
-                                )}
-                              </label>
-                            </div>
-                          </div>
-
-                          {/* NIC Back Image Upload */}
-                          <div>
-                            <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase">NIC Back Side (පසුපස)</label>
-                            <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-red-500 transition-colors bg-gray-50/50">
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={(e) => handleNICFileChange(e, "nicBackImage")}
-                                className="hidden"
-                                id="nic-back-picker"
-                              />
-                              <label htmlFor="nic-back-picker" className="cursor-pointer space-y-2 block">
-                                {nicBack ? (
-                                  <div className="relative inline-block">
-                                    <img
-                                      src={nicBack}
-                                      alt="NIC Back Preview"
-                                      className="h-28 object-contain rounded-lg border bg-white shadow-sm"
-                                    />
-                                    <span className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs cursor-pointer shadow" onClick={(e) => { e.preventDefault(); setNicBack(""); }}>✕</span>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-1">
-                                    <svg className="w-8 h-8 text-gray-400 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                    <p className="text-xs font-semibold text-red-655">Choose Image File</p>
-                                  </div>
-                                )}
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      </>
-                    )}
                   </div>
                 </div>
 
                 <div className="pt-4">
                   <button
-                    type="button"
-                    onClick={handleProfileSubmit}
+                    type="submit"
                     disabled={savingProfile}
                     className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold py-3 px-6 rounded-lg transition-colors text-sm shadow-md flex items-center justify-center gap-2"
                   >
@@ -2321,75 +2024,31 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                   </div>
 
                   {/* Item 3: Profile Photo */}
-                  <div className={`flex items-center justify-between p-3 border rounded-xl ${
-                    student?.isProfileVerified
-                      ? "bg-green-50 border-green-200 text-green-800"
-                      : student?.profileImage
-                      ? "bg-amber-50 border-amber-200 text-amber-850"
-                      : "bg-red-50 border-red-200 text-red-800"
-                  }`}>
+                  <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-xl">
                     <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                        student?.isProfileVerified
-                          ? "bg-green-100 text-green-600"
-                          : student?.profileImage
-                          ? "bg-amber-100 text-amber-600"
-                          : "bg-red-100 text-red-600"
-                      }`}>
+                      <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center text-green-600">
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                       </div>
                       <div>
                         <p className="text-xs text-gray-400">Profile Photo</p>
-                        <p className="text-sm font-semibold text-gray-800">
-                          {student?.isProfileVerified ? "Verified (තහවුරු කර ඇත)" : student?.profileImage ? "Pending (පරීක්ෂා වෙමින් පවතී)" : "Not Uploaded (ඇතුලත් කර නැත)"}
-                        </p>
+                        <p className="text-sm font-semibold text-gray-800">Uploaded</p>
                       </div>
                     </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                      student?.isProfileVerified
-                        ? "text-green-700 bg-green-100"
-                        : student?.profileImage
-                        ? "text-amber-700 bg-amber-100"
-                        : "text-red-700 bg-red-100"
-                    }`}>
-                      {student?.isProfileVerified ? "Verified" : student?.profileImage ? "Pending" : "Required"}
-                    </span>
+                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full uppercase">Uploaded</span>
                   </div>
 
                   {/* Item 4: NIC */}
-                  <div className={`flex items-center justify-between p-3 border rounded-xl ${
-                    student?.isNICVerified
-                      ? "bg-green-50 border-green-200 text-green-800"
-                      : (student?.nicFrontImage || student?.nicBackImage)
-                      ? "bg-amber-50 border-amber-200 text-amber-855"
-                      : "bg-red-50 border-red-200 text-red-800"
-                  }`}>
+                  <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-xl">
                     <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                        student?.isNICVerified
-                          ? "bg-green-100 text-green-600"
-                          : (student?.nicFrontImage || student?.nicBackImage)
-                          ? "bg-amber-100 text-amber-600"
-                          : "bg-red-100 text-red-600"
-                      }`}>
+                      <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center text-green-600">
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                       </div>
                       <div>
                         <p className="text-xs text-gray-400">NIC: {student?.nic || "N/A"}</p>
-                        <p className="text-sm font-semibold text-gray-800">
-                          {student?.isNICVerified ? "Verified (තහවුරු කර ඇත)" : (student?.nicFrontImage || student?.nicBackImage) ? "Pending (පරීක්ෂා වෙමින් පවතී)" : "Not Uploaded (ඇතුලත් කර නැත)"}
-                        </p>
+                        <p className="text-sm font-semibold text-gray-800">National ID Card Details</p>
                       </div>
                     </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                      student?.isNICVerified
-                        ? "text-green-700 bg-green-100"
-                        : (student?.nicFrontImage || student?.nicBackImage)
-                        ? "text-amber-700 bg-amber-100"
-                        : "text-red-700 bg-red-100"
-                    }`}>
-                      {student?.isNICVerified ? "Verified" : (student?.nicFrontImage || student?.nicBackImage) ? "Pending" : "Required"}
-                    </span>
+                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full uppercase">APPROVED</span>
                   </div>
 
                   {/* Item 5: Address (replacing Location) */}
@@ -2431,22 +2090,7 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                         {getInitials()}
                       </div>
                     )}
-                    {student?.isProfileVerified && student?.isNICVerified && (
-                      <span className="absolute bottom-1 right-1 w-4.5 h-4.5 bg-green-500 border-2 border-white rounded-full flex items-center justify-center text-white text-[9px] font-bold shadow">✓</span>
-                    )}
-                  </div>
-
-                  {/* Verification Status Badge under Profile Image */}
-                  <div className="mb-2">
-                    {student?.isProfileVerified && student?.isNICVerified ? (
-                      <span className="text-[10px] font-extrabold tracking-wider text-green-700 bg-green-100 rounded-full px-3 py-1 uppercase inline-block shadow-sm">
-                        Verified Student
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-extrabold tracking-wider text-red-650 bg-red-50 border border-red-200 rounded-full px-3 py-1 uppercase inline-block shadow-sm">
-                        Non Verified Student
-                      </span>
-                    )}
+                    <span className="absolute bottom-1 right-1 w-4.5 h-4.5 bg-green-500 border-2 border-white rounded-full flex items-center justify-center text-white text-[9px] font-bold">✓</span>
                   </div>
 
                   {/* Name and Details */}
@@ -2741,13 +2385,12 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                 {/* File picker */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Upload Slip File (JPG/PNG/PDF)
+                    Upload Slip Image (JPG/PNG)
                   </label>
-                  <p className="text-[11px] font-bold text-red-600">⚠️ කරුණාකර 1MB ට වඩා අඩු රිසිට්පතක් (png, jpeg, jpg, pdf) ඇතුළත් කරන්න.</p>
                   <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-red-500 transition-colors bg-gray-50/50">
                     <input
                       type="file"
-                      accept="image/*,application/pdf"
+                      accept="image/*"
                       onChange={handleImageFileChange}
                       required
                       className="hidden"
@@ -2756,27 +2399,18 @@ export default function StudentDashboard({ onNavigate, initialStudentData, onLog
                     <label htmlFor="slip-image-picker" className="cursor-pointer space-y-2 block">
                       {slipImage ? (
                         <div className="relative inline-block">
-                          {slipImage.startsWith("data:application/pdf;base64,") ? (
-                            <div className="flex flex-col items-center gap-2 p-4 bg-red-50 rounded-lg border">
-                              <svg className="w-12 h-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              <span className="text-[10px] font-bold text-gray-750">PDF Slip Document</span>
-                            </div>
-                          ) : (
-                            <img
-                              src={slipImage}
-                              alt="Slip Preview"
-                              className="h-32 object-contain rounded-lg border bg-white shadow-sm"
-                            />
-                          )}
-                          <span className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold cursor-pointer shadow" onClick={(e) => { e.preventDefault(); setSlipImage(""); }}>✕</span>
+                          <img
+                            src={slipImage}
+                            alt="Slip Preview"
+                            className="h-32 object-contain rounded-lg border bg-white shadow-sm"
+                          />
+                          <span className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 text-xs cursor-pointer shadow">✕</span>
                         </div>
                       ) : (
                         <div className="space-y-1">
                           <svg className="w-10 h-10 text-gray-400 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                          <p className="text-xs font-semibold text-red-650">Choose File</p>
-                          <p className="text-[10px] text-gray-450">Drag &amp; drop or click to upload</p>
+                          <p className="text-xs font-semibold text-red-600">Choose Image File</p>
+                          <p className="text-[10px] text-gray-400">Drag &amp; drop or click to upload</p>
                         </div>
                       )}
                     </label>
