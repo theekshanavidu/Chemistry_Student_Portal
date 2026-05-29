@@ -71,7 +71,17 @@ export default function Register({ onNavigate }) {
     setLoading(true);
     setError("");
     try {
+<<<<<<< HEAD
       // 1. Create the Firebase Auth account first (needed for Firestore auth rules)
+=======
+      // Check if NIC is unique
+      const nicUnique = await isNICUnique(formData.nic);
+      if (!nicUnique) {
+        setError("මෙම NIC අංකය දැනටමත් ලියාපදිංචි කර ඇත.");
+        setLoading(false);
+        return;
+      }
+>>>>>>> 68b83af9ea525d0326c4e497a09d85c0956143da
       const user = await registerStudent(formData.email, formData.password);
 
       // 2. NOW check NIC uniqueness — user is authenticated so Firestore rules pass
